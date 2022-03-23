@@ -1,0 +1,39 @@
+/home/chattbap/anaconda3/lib/python3.8/site-packages/torchvision/transforms/transforms.py:935: UserWarning: The use of the transforms.RandomSizedCrop transform is deprecated, please use transforms.RandomResizedCrop instead.
+  warnings.warn("The use of the transforms.RandomSizedCrop transform is deprecated, " +
+Traceback (most recent call last):
+  File "model/pytorch_model_trainer.py", line 259, in <module>
+    train(model_trainer.train_loader, model_trainer.model, model_trainer.loss, model_trainer.optimizer, i + 1,
+  File "model/pytorch_model_trainer.py", line 143, in train
+    output = model(input_var)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1102, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torchvision/models/resnet.py", line 249, in forward
+    return self._forward_impl(x)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torchvision/models/resnet.py", line 238, in _forward_impl
+    x = self.layer2(x)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1102, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/container.py", line 141, in forward
+    input = module(input)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1102, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torchvision/models/resnet.py", line 132, in forward
+    out = self.conv3(out)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1102, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py", line 446, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/conv.py", line 442, in _conv_forward
+    return F.conv2d(input, weight, bias, self.stride,
+RuntimeError: CUDA out of memory. Tried to allocate 784.00 MiB (GPU 0; 31.75 GiB total capacity; 29.48 GiB already allocated; 254.00 MiB free; 29.93 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpirun detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[47135,1],0]
+  Exit code:    1
+--------------------------------------------------------------------------

@@ -38,10 +38,12 @@ class PytorchModelTrainer:
         self.loss = self.loss.to(self.device)
         self.model.to(self.device)
         print("Device being used for training :", self.device, flush=True)
+        print("Loading dataset")
         self.train_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], True),
                                        batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
         self.test_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], False),
                                       batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
+        print("Dataset loaded")
 
     def evaluate(self, dataloader):
         self.model.eval()
@@ -160,6 +162,7 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                 epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
+        
 
 
 def validate(val_loader, model, criterion, model_trainer):

@@ -7,6 +7,7 @@ from helper.pytorch.optimizers import SFW
 from helper.pytorch.constraints import *
 import model.pytorch.resnet as resnet
 import model.pytorch.googlenet as googlenet
+import torchvision
 
 
 def create_seed_model(config):
@@ -22,6 +23,8 @@ def create_seed_model(config):
         model = resnet.resnet110()
     elif config["model"]["model_type"] == "googlenet":
         model = googlenet.googlenet()
+    elif config["model"]["model_type"] == "resnet50":
+        model = torchvision.models.resnet50()
     else:
         model = Net()
     if config["loss"] == "neg_log_likelihood":

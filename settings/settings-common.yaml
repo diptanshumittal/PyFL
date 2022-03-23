@@ -1,7 +1,7 @@
 storage:
   storage_config:
     storage_access_key: minioadmin
-    storage_hostname: 192.168.64.187
+    storage_hostname: 10.0.0.43
     storage_port: 9000
     storage_secret_key: minioadmin
     storage_secure_mode: false
@@ -9,15 +9,15 @@ storage:
 training:
   data:
     batch_size: 128
-    dataset: cifar10
+    dataset: imagenet
   loss: cross_entropy
   lr_scheduler:
     baseline_lr: 0.1
     gamma: 0.1
-    lrmilestone: 100 150
+    lrmilestone: 30 60 90
     type: multistep
   model:
-    model_type: resnet20
+    model_type: resnet50
   optimizer:
     learning_rate: 0.1
     mode: initialization
@@ -28,4 +28,4 @@ training:
     value: 30
     weight_decay: 0.0001
 training_identifier:
-  id: '25'
+  id: '30'

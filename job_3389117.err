@@ -1,0 +1,31 @@
+/home/chattbap/anaconda3/lib/python3.8/site-packages/torchvision/transforms/transforms.py:935: UserWarning: The use of the transforms.RandomSizedCrop transform is deprecated, please use transforms.RandomResizedCrop instead.
+  warnings.warn("The use of the transforms.RandomSizedCrop transform is deprecated, " +
+Traceback (most recent call last):
+  File "model/pytorch_model_trainer.py", line 259, in <module>
+    validate(model_trainer.test_loader, model_trainer.model, model_trainer.loss, model_trainer)
+  File "model/pytorch_model_trainer.py", line 176, in validate
+    for i, (input, target) in enumerate(val_loader):
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 561, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    return self.collate_fn(data)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/_utils/collate.py", line 84, in default_collate
+    return [default_collate(samples) for samples in transposed]
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/_utils/collate.py", line 84, in <listcomp>
+    return [default_collate(samples) for samples in transposed]
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/utils/data/_utils/collate.py", line 56, in default_collate
+    return torch.stack(batch, 0, out=out)
+RuntimeError: stack expects each tensor to be equal size, but got [3, 375, 500] at entry 0 and [3, 500, 375] at entry 1
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpirun detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[36593,1],0]
+  Exit code:    1
+--------------------------------------------------------------------------

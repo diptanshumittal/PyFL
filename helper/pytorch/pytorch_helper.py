@@ -12,6 +12,8 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torchvision.datasets import VisionDataset
 from typing import Any, Callable, Optional, Tuple
+from helper.pytorch.dataset import ImageNetDataset
+
 
 
 class PytorchHelper:
@@ -55,7 +57,7 @@ class PytorchHelper:
         return weights_np
 
     def read_data(self, dataset, data_path, trainset):
-        if dataset == "Imagenet":
+        if dataset == "imagenet":
             return self.read_data_imagenet(data_path, trainset)
         elif dataset == "mnist":
             return self.read_data_mnist(data_path, trainset)
@@ -152,22 +154,15 @@ class PytorchHelper:
     #     dataset = TensorDataset(tensor_x, tensor_y)
     #     return dataset
 
-    def read_data_imagenet(self, data_path, trainset=True):
-        pack = np.load(data_path)
+    def read_data_imagenet(self, data_path, trainset=True, test_sample=1000, train_sample=50000):
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
         if trainset:
-            X = pack['x_train']
-            y = pack['y_train']
+            dataset = ImageNetDataset("/home/chattbap/ILSVRC/train/", transforms.Compose([transforms.RandomSizedCrop(224),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize]))
+            sample = np.random.permutation(len(dataset))[:train_sample]
         else:
-            X = pack['x_test']
-            y = pack['y_test']
-        X = X.astype('float32')
-        y = y.astype('int64') - 1
-        X = X.reshape(X.shape[0], 3, 64, 64)
-        X /= 255
-        tensor_x = torch.Tensor(X)
-        tensor_y = torch.from_numpy(y)
-        dataset = TensorDataset(tensor_x, tensor_y)
-        return dataset
+            dataset = ImageNetDataset("/home/chattbap/ILSVRC/val/", transforms.Compose([transforms.RandomSizedCrop(224),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize]))
+            sample = np.random.permutation(len(dataset))[:test_sample]
+        return torch.utils.data.Subset(dataset, sample)
 
     # def load_model_from_BytesIO(self, model_bytesio):
     #     """ Load a model from a BytesIO object. """

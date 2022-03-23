@@ -63,15 +63,15 @@ def start_clients():
 def start_clients_slurm(total_clients):
     try:
         for i in range(1, total_clients + 1):
-            a_file = open("batchscripts/start_client_1.sh", "r")
-            list_of_lines = a_file.readlines()
-            list_of_lines[-1] = "mpirun -np 1 $PYTHON Client/client.py --client_id=" + str(i)
+            # a_file = open("batchscripts/start_client_1.sh", "r")
+            # list_of_lines = a_file.readlines()
+            # list_of_lines[-1] = "mpirun -np 1 $PYTHON Client/client.py --client_id=" + str(i)
 
-            a_file = open("batchscripts/start_client_1.sh", "w")
-            a_file.writelines(list_of_lines)
-            a_file.close()
+            # a_file = open("batchscripts/start_client_1.sh", "w")
+            # a_file.writelines(list_of_lines)
+            # a_file.close()
             Process(target=run_container, args=("sbatch batchscripts/start_client_1.sh",), daemon=True).start()
-            time.sleep(3)
+            time.sleep(1)
     except Exception as e:
         print(e)
 
@@ -87,15 +87,15 @@ def create_dataset_partitions(common_config, no_of_clients):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        no_of_clients = 8
+        no_of_clients = 10
     else:
         no_of_clients = int(sys.argv[1])
-    with open('settings/settings-common.yaml', 'r') as file:
-        try:
-            common_config = dict(yaml.safe_load(file))
-        except yaml.YAMLError as error:
-            print('Failed to read model_config from settings file', flush=True)
-            raise error
+    # with open('settings/settings-common.yaml', 'r') as file:
+    #     try:
+    #         common_config = dict(yaml.safe_load(file))
+    #     except yaml.YAMLError as error:
+    #         print('Failed to read model_config from settings file', flush=True)
+    #         raise error
     # create_dataset_partitions(common_config, no_of_clients)
     if len(sys.argv) > 2 and sys.argv[2] == "slurm":
         start_clients_slurm(no_of_clients)

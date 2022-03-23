@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "model/pytorch_model_trainer.py", line 250, in <module>
+    model_trainer = PytorchModelTrainer(client_config["training"])
+  File "model/pytorch_model_trainer.py", line 39, in __init__
+    self.model.to(self.device)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 899, in to
+    return self._apply(convert)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 570, in _apply
+    module._apply(fn)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 593, in _apply
+    param_applied = fn(param)
+  File "/home/chattbap/anaconda3/lib/python3.8/site-packages/torch/nn/modules/module.py", line 897, in convert
+    return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+RuntimeError: CUDA error: invalid device ordinal
+CUDA kernel errors might be asynchronously reported at some other API call,so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
+--------------------------------------------------------------------------
+Primary job  terminated normally, but 1 process returned
+a non-zero exit code. Per user-direction, the job has been aborted.
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+mpirun detected that one or more processes exited with non-zero status, thus causing
+the job to be terminated. The first process to do so was:
+
+  Process name: [[37212,1],0]
+  Exit code:    1
+--------------------------------------------------------------------------

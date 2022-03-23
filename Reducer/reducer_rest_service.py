@@ -161,6 +161,16 @@ class ReducerRestService:
                 available_id = "client_" + str(self.unique_clients)
                 self.clients[name + ":" + port] = Client(name, port, self.rounds, available_id)
                 print("Connected clients are ", list(self.clients.keys()), flush=True)
+                if len(self.clients) > 10:
+                    config = {
+                        "rounds": 200,
+                        "round_time": 2000000,
+                        "epochs": 2
+                    }
+                    self.stop_training_event.clear()
+                    self.training = threading.Thread(target=self.train, args=(config,))
+                    self.training.start()
+                    self.status = "Training"
                 return jsonify({
                     'status': "added",
                     'id': available_id
@@ -169,6 +179,8 @@ class ReducerRestService:
                 return jsonify({
                     'status': "Not compatible!!"
                 })
+            
+
 
         @app.route('/reconnectclient')
         @auto.doc()

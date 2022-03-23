@@ -11,4 +11,4 @@
 #SBATCH --job-name=fed_client        # job name (default is the name of this file)
 ml fosscuda/2019a
 PYTHON=/home/chattbap/anaconda3/bin/python
-mpirun -np 1 $PYTHON Client/client.py --client_id=8
+mpirun -np 1 $PYTHON Client/client.py --gpu=cuda:0
