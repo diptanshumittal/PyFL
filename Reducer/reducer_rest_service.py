@@ -22,10 +22,6 @@ class Client:
         self.connect_string = "http://{}:{}".format(self.name, self.port)
         self.last_checked = time.time()
         self.id = id
-        # self.training_acc = [0] * rounds
-        # self.testing_acc = [0] * rounds
-        # self.training_loss = [0] * rounds
-        # self.testing_loss = [0] * rounds
 
     def send_round_start_request(self, round_id, bucket_name, global_model, epochs):
         try:
@@ -90,6 +86,7 @@ class ReducerRestService:
         self.status = "Idle"
         self.unique_clients = 0
         self.training_id = config["training_id"]
+        self.training_process = None
         threading.Thread(target=self.remove_disconnected_clients, daemon=True).start()
 
     def remove_disconnected_clients(self):
@@ -112,6 +109,7 @@ class ReducerRestService:
         Method for stopping the training across all the clients upon admin request.
         :return:
         """
+        self.stop_training_event.set()
         executor = ThreadPoolExecutor(max_workers=10)
         pending_jobs = []
         for _, client in self.clients.items():
@@ -123,14 +121,13 @@ class ReducerRestService:
             print("Sending round stop requests to the clients")
             pending_jobs = remove_pending_jobs(pending_jobs)
             time.sleep(5)
-        self.stop_training_event.set()
         self.training.join()
         assert self.get_clients_training() == 0
         self.rounds -= 1
         self.status = "Idle"
 
     def run(self):
-        log = logging.getLogger('werkzeug')
+        # log = logging.getLogger('werkzeug')
         # log.setLevel(logging.ERROR)
         app = Flask(__name__)
         auto = Autodoc(app)
@@ -179,8 +176,6 @@ class ReducerRestService:
                 return jsonify({
                     'status': "Not compatible!!"
                 })
-            
-
 
         @app.route('/reconnectclient')
         @auto.doc()
@@ -223,10 +218,7 @@ class ReducerRestService:
             self.training = threading.Thread(target=self.train, args=(config,))
             self.training.start()
             self.status = "Training"
-            ret = {
-                'status': "Training started"
-            }
-            return jsonify(ret)
+            return jsonify({'status': "Training started"})
 
         @app.route('/stoptraining')
         @auto.doc()
@@ -252,22 +244,18 @@ class ReducerRestService:
                 writer = SummaryWriter(self.tensorboard_path + "/" + self.training_id + "-" + self.clients[id].id)
                 self.clients[id].status = "Idle"
                 res = request.args.get("report", None)
-                if res is None:
-                    res = {"training_accuracy": 0, "test_accuracy": 0, "training_loss": 0, "test_loss": 0,
-                           "round_time": 0}
-                else:
+                if res is not None:
                     res = json.loads(res)
-                writer.add_scalar('training_loss', res["training_loss"], round_id)
-                writer.add_scalar('test_loss', res["test_loss"], round_id)
-                writer.add_scalar('training_accuracy', res["training_accuracy"], round_id)
-                writer.add_scalar('test_accuracy', res["test_accuracy"], round_id)
-                writer.add_scalar('round_time', res["round_time"], round_id)
-                writer.close()
-                print("Client - ", id, " completed round ", round_id, flush=True)
-                # self.clients[id].training_acc.append(float(res["training_accuracy"]))
-                # self.clients[id].testing_acc.append(float(res["test_accuracy"]))
-                # self.clients[id].training_loss.append(float(res["training_loss"]))
-                # self.clients[id].testing_loss.append(float(res["test_loss"]))
+                    if res["status"] != "fail":
+                        writer.add_scalar('training_loss', res["training_loss"], round_id)
+                        writer.add_scalar('test_loss', res["test_loss"], round_id)
+                        writer.add_scalar('training_accuracy', res["training_accuracy"], round_id)
+                        writer.add_scalar('test_accuracy', res["test_accuracy"], round_id)
+                        writer.add_scalar('round_time', res["round_time"], round_id)
+                        writer.close()
+                        print("Client - ", id, " successfully completed round ", round_id, flush=True)
+                    else:
+                        print("Client - ", id, " unsuccessfully completed round ", round_id, flush=True)
                 return jsonify({'status': "Success"})
             return jsonify({'status': "Failure"})
 
@@ -300,34 +288,6 @@ class ReducerRestService:
                     'status': "Not Available"
                 }
                 return jsonify(ret)
-
-        @app.route('/creategraph')
-        @auto.doc()
-        def create_graph():
-            """Not in use"""
-            for key, client in self.clients.items():
-                x = np.linspace(1, len(client.training_acc), len(client.training_acc))
-                plt.plot(x, client.training_acc, "-b", label="Train_Acc")
-                plt.plot(x, client.testing_acc, "-r", label="Test_Acc")
-                plt.legend(loc="upper right")
-                plt.xlabel("Rounds")
-                plt.ylabel("Accuracy")
-                plt.title("Rounds vs Accuracy for client : " + key)
-                plt.savefig(key + '_Acc.png')
-                plt.clf()
-                plt.plot(x, client.training_loss, "-b", label="Train_loss")
-                plt.plot(x, client.testing_loss, "-r", label="Test_loss")
-                plt.legend(loc="upper right")
-                plt.xlabel("Rounds")
-                plt.ylabel("Loss")
-                plt.title("Rounds vs Loss for client : " + key)
-                plt.savefig(key + '_Loss.png')
-                plt.clf()
-            ret = {
-                'status': "Created"
-            }
-            return jsonify(ret)
-
         app.run(host="0.0.0.0", port=self.port)
 
     def get_clients_training(self):
@@ -348,73 +308,80 @@ class ReducerRestService:
         :return:
         """
         for i in range(config["rounds"]):
+            if self.stop_training_event.is_set():
+                return
             self.rounds += 1
             print("Round ---", self.rounds, "---", flush=True)
             bucket_name = "round" + str(self.rounds)
-            if self.minio_client.bucket_exists(bucket_name):
-                for obj in self.minio_client.list_objects(bucket_name):
-                    self.minio_client.remove_object(bucket_name, object_name=obj.object_name)
-            else:
-                self.minio_client.make_bucket(bucket_name)
-
-            self.clients_updated = len(self.clients)
-            executor = ThreadPoolExecutor(max_workers=10)
-            pending_jobs = []
-            if self.stop_training_event.is_set():
-                return
-            for _, client in self.clients.items():
-                pending_jobs.append(
-                    executor.submit(client.send_round_start_request, self.rounds, bucket_name, self.global_model,
-                                    config["epochs"]))
-            while True:
-                if len(remove_pending_jobs(pending_jobs)) == 0:
-                    break
-                time.sleep(0.1)
-            print("Round start requests send to the clients successfully", flush=True)
-            total_clients_started_training = self.get_clients_training()
-            print("Total clients that started the training are", total_clients_started_training, flush=True)
-            start_time = time.time()
-            total_clients_in_training = total_clients_started_training
-            while True:
-                round_time = time.time() - start_time
-                client_training = self.get_clients_training()
-                if client_training < total_clients_in_training:
-                    print("Clients in Training : " + str(client_training), flush=True)
-                    total_clients_in_training = client_training
-                if total_clients_in_training == 0 or int(round_time) > config["round_time"]:
-                    break
-                time.sleep(2)
-
-            model = None
-            helper = PytorchHelper()
-            self.minio_client.fget_object('fedn-context', self.global_model, self.global_model)
-            base_model = helper.load_model(self.global_model)
-            os.remove(self.global_model)
-            reducer_learning_rate = 1
-            processed_model = 0
-            for obj in self.minio_client.list_objects(bucket_name):
-                if self.stop_training_event.is_set():
-                    break
-                self.minio_client.fget_object(bucket_name, obj.object_name, obj.object_name)
-                if processed_model == 0:
-                    model = helper.get_tensor_diff(helper.load_model(obj.object_name), base_model)
-                else:
-                    model = helper.increment_average(model, helper.get_tensor_diff(helper.load_model(obj.object_name),
-                                                                                   base_model),
-                                                     processed_model + 1)
-                processed_model += 1
-                os.remove(obj.object_name)
-
-            if model is not None and not self.stop_training_event.is_set():
-                model = helper.add_base_model(model, base_model, reducer_learning_rate)
-                model_name = str(uuid.uuid4()) + ".npz"
-                helper.save_model(model, model_name)
-                self.minio_client.fput_object("fedn-context", model_name, model_name)
-                self.global_model = model_name
-                os.remove(model_name)
-
-            if self.stop_training_event.is_set():
-                return
+            self.bucket_setup(bucket_name)
+            self.send_start_request(bucket_name, config)
+            self.wait_for_clients(config)
+            self.aggregate_updates(bucket_name)
         print("Training for {} rounds ended with global model {}".format(str(config["rounds"]), self.global_model),
               flush=True)
         self.status = "Idle"
+
+    def bucket_setup(self, bucket_name):
+        if self.minio_client.bucket_exists(bucket_name):
+            for obj in self.minio_client.list_objects(bucket_name):
+                self.minio_client.remove_object(bucket_name, object_name=obj.object_name)
+        else:
+            self.minio_client.make_bucket(bucket_name)
+
+    def aggregate_updates(self, bucket_name):
+        model = None
+        helper = PytorchHelper()
+        self.minio_client.fget_object('fedn-context', self.global_model, self.global_model)
+        base_model = helper.load_model(self.global_model)
+        os.remove(self.global_model)
+        reducer_learning_rate = 1
+        processed_model = 0
+        for obj in self.minio_client.list_objects(bucket_name):
+            if self.stop_training_event.is_set():
+                break
+            self.minio_client.fget_object(bucket_name, obj.object_name, obj.object_name)
+            if processed_model == 0:
+                model = helper.get_tensor_diff(helper.load_model(obj.object_name), base_model)
+            else:
+                model = helper.increment_average(model, helper.get_tensor_diff(helper.load_model(obj.object_name),
+                                                                               base_model),
+                                                 processed_model + 1)
+            processed_model += 1
+            os.remove(obj.object_name)
+
+        if model is not None and not self.stop_training_event.is_set():
+            model = helper.add_base_model(model, base_model, reducer_learning_rate)
+            model_name = str(uuid.uuid4()) + ".npz"
+            helper.save_model(model, model_name)
+            self.minio_client.fput_object("fedn-context", model_name, model_name)
+            self.global_model = model_name
+            os.remove(model_name)
+
+    def send_start_request(self, bucket_name, config):
+        self.clients_updated = len(self.clients)
+        executor = ThreadPoolExecutor(max_workers=10)
+        pending_jobs = []
+        for _, client in self.clients.items():
+            pending_jobs.append(
+                executor.submit(client.send_round_start_request, self.rounds, bucket_name, self.global_model,
+                                config["epochs"]))
+        while True:
+            if len(remove_pending_jobs(pending_jobs)) == 0:
+                break
+            time.sleep(0.1)
+        print("Round start requests send to the clients successfully", flush=True)
+
+    def wait_for_clients(self, config):
+        total_clients_started_training = self.get_clients_training()
+        print("Total clients that started the training are", total_clients_started_training, flush=True)
+        start_time = time.time()
+        total_clients_in_training = total_clients_started_training
+        while True:
+            round_time = time.time() - start_time
+            client_training = self.get_clients_training()
+            if client_training < total_clients_in_training:
+                print("Clients in Training : " + str(client_training), flush=True)
+                total_clients_in_training = client_training
+            if total_clients_in_training == 0 or int(round_time) > config["round_time"]:
+                break
+            time.sleep(2)

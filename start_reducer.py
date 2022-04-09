@@ -41,7 +41,7 @@ def start_reducer():
     Process(target=run_container,
             args=("./minio server minio_data/ --console-address \":9001\" >> data/minio_logs/minio_logs.txt",),
             daemon=True).start()
-    time.sleep(5)
+    time.sleep(1)
     with open("settings/settings-common.yaml", 'r') as file:
         config = dict(yaml.safe_load(file))
     config["storage"]["storage_config"]["storage_hostname"] = get_local_ip()
@@ -53,4 +53,4 @@ def start_reducer():
 
 
 start_reducer()
-time.sleep(5)
+time.sleep(2)

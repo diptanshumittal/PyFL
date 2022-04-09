@@ -3,6 +3,7 @@ from datetime import datetime
 import threading
 import time
 import yaml
+import argparse
 import os
 import sys
 import subprocess
@@ -14,6 +15,13 @@ from extras.create_cifar100_dataset import create_cifar100_partitions
 
 def run_container(cmd):
     subprocess.call(cmd, shell=True)
+
+
+parser = argparse.ArgumentParser(description='Federated Learning Client')
+parser.add_argument('--type', default='batchscript', type=str, help='Type of initialization')
+parser.add_argument('--partition_dataset', default=False, type=bool, help='Type of initialization')
+parser.add_argument('--clients', default=1, type=int, help='Type of initialization')
+args = parser.parse_args()
 
 
 def start_clients_docker():
@@ -48,10 +56,10 @@ def start_clients_docker():
         print(e)
 
 
-def start_clients():
+def start_clients(clients):
     try:
         available_gpus = ["cuda:0", "cuda:2", "cuda:3", "cuda:3", "cuda:0", "cuda:1", "cuda:2", "cuda:3"]
-        for i in range(1):
+        for i in range(clients):
             Process(target=run_container,
                     args=("python Client/client.py --gpu=" + available_gpus[i],),
                     daemon=True).start()
@@ -60,16 +68,28 @@ def start_clients():
         print(e)
 
 
-def start_clients_slurm(total_clients):
+def start_batchscript(clients):
     try:
-        for i in range(1, total_clients + 1):
-            # a_file = open("batchscripts/start_client_1.sh", "r")
-            # list_of_lines = a_file.readlines()
-            # list_of_lines[-1] = "mpirun -np 1 $PYTHON Client/client.py --client_id=" + str(i)
+        gpu = "cuda:0"  # + os.environ["CUDA_VISIBLE_DEVICES"]
+        # from Client.client import Client
+        # client = Client(args)
+        # client.run()
+        jobs = []
+        for i in range(clients):
+            p = Process(target=run_container, args=("python Client/client.py --gpu=" + gpu,))
+            p.start()
+            jobs.append(p)
+        for job in jobs:
+            print("Waiting for the clients to end")
+            job.join()
 
-            # a_file = open("batchscripts/start_client_1.sh", "w")
-            # a_file.writelines(list_of_lines)
-            # a_file.close()
+    except Exception as e:
+        print(e)
+
+
+def start_clients_slurm(clients):
+    try:
+        for _ in range(clients):
             Process(target=run_container, args=("sbatch batchscripts/start_client_1.sh",), daemon=True).start()
             time.sleep(1)
     except Exception as e:
@@ -86,18 +106,18 @@ def create_dataset_partitions(common_config, no_of_clients):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        no_of_clients = 10
+    if args.partition_dataset:
+        with open('settings/settings-common.yaml', 'r') as file:
+            try:
+                common_config = dict(yaml.safe_load(file))
+            except yaml.YAMLError as error:
+                print('Failed to read model_config from settings file', flush=True)
+                raise error
+        create_dataset_partitions(common_config, args.clients)
+    if args.type == "batchscript":
+        print("Starting the client with SLURM_PROCID = ", os.environ['SLURM_PROCID'])
+        start_batchscript(args.clients)
+    elif args.type == "slurm":
+        start_clients_slurm(args.clients)
     else:
-        no_of_clients = int(sys.argv[1])
-    # with open('settings/settings-common.yaml', 'r') as file:
-    #     try:
-    #         common_config = dict(yaml.safe_load(file))
-    #     except yaml.YAMLError as error:
-    #         print('Failed to read model_config from settings file', flush=True)
-    #         raise error
-    # create_dataset_partitions(common_config, no_of_clients)
-    if len(sys.argv) > 2 and sys.argv[2] == "slurm":
-        start_clients_slurm(no_of_clients)
-    else:
-        start_clients()
+        start_clients(args.clients)

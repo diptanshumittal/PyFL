@@ -11,6 +11,7 @@ import torchvision
 
 
 def create_seed_model(config):
+    print(config)
     if config["model"]["model_type"] == "mnist":
         model = Net()
     elif config["model"]["model_type"] == "mnist":
@@ -44,8 +45,9 @@ def create_seed_model(config):
     elif config["optimizer"]["optimizer"] == "adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     elif config["optimizer"]["optimizer"] == "SGD":
-        optimizer = torch.optim.SGD(model.parameters(), lr=float(config["learning_rate"]),
-                                    momentum=float(config["momentum"]), weight_decay=float(config["weight_decay"]))
+        cf = config["optimizer"]
+        optimizer = torch.optim.SGD(model.parameters(), lr=float(cf["learning_rate"]),
+                                    momentum=float(cf["momentum"]), weight_decay=float(cf["weight_decay"]))
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     if config["lr_scheduler"]["type"] == "multistep":

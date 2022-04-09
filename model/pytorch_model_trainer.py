@@ -31,17 +31,18 @@ def np_to_weights(weights_np):
 class PytorchModelTrainer:
     def __init__(self, config):
         self.helper = PytorchHelper()
-        self.stop_event = threading.Event()
         self.global_model_path = config["global_model_path"]
         self.model, self.loss, self.optimizer, self.scheduler = create_seed_model(config)
         self.device = torch.device(config["cuda_device"])
         self.loss = self.loss.to(self.device)
         self.model.to(self.device)
+        self.round_type = config["round"]["type"]
+        self.config = config
         print("Device being used for training :", self.device, flush=True)
         print("Loading dataset")
-        self.train_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], True),
+        self.train_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], config["train_samples"], True),
                                        batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
-        self.test_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], False),
+        self.test_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], config["test_samples"], False),
                                       batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
         print("Dataset loaded")
 
@@ -51,8 +52,6 @@ class PytorchModelTrainer:
         correct = 0
         with torch.no_grad():
             for x, y in dataloader:
-                if self.stop_event.is_set():
-                    raise ValueError("Round stop requested by the reducer!!!")
                 x, y = x.to(self.device), y.to(self.device)
                 output = self.model(x)
                 loss += self.loss(output, y).item() * x.size(0)
@@ -80,14 +79,13 @@ class PytorchModelTrainer:
         }
         print("-- VALIDATION COMPLETED --", flush=True)
         return report
+
     #
     # def train(self, settings):
     #     # print("-- RUNNING TRAINING --", flush=True)
     #     self.model.train()
     #     for i in range(settings['epochs']):
     #         for x, y in self.train_loader:
-    #             if self.stop_event.is_set():
-    #                 raise ValueError("Round stop requested by the reducer!!!")
     #             x, y = x.to(self.device), y.to(self.device)
     #             self.optimizer.zero_grad()
     #             if isinstance(self.model, googlenet.GoogLeNet):
@@ -102,23 +100,37 @@ class PytorchModelTrainer:
     #         # print(self.optimizer.param_groups[0]["lr"])
     #     # print("-- TRAINING COMPLETED --", flush=True)
 
-    def start_round(self, round_config, stop_event):
-        self.stop_event = stop_event
+    def start_round(self, round_config):
         try:
             self.model.load_state_dict(np_to_weights(self.helper.load_model(self.global_model_path)))
             self.model.to(self.device)
-            for i in range(round_config['epochs']):
-                print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
-                train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
-                self.scheduler.step()
-                if self.stop_event.is_set():
-                    raise Exception("Stop requested")
+            if self.round_type == "fedavg":
+                for i in range(round_config['epochs']):
+                    print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
+                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
+                    self.scheduler.step()
+                    if self.stop_event.is_set():
+                        raise Exception("Stop requested")
+            elif self.round_type == "fedprocx":
+                base_loss, base_acc = self.evaluate(self.train_loader)
+                i = 1
+                print("Base training loss = ", base_loss, " threshold = ",
+                      (self.config["round"]["stopping"] * base_loss), flush=True)
+                while True:
+                    print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
+                    train(self.train_loader, self.model, self.loss, self.optimizer, i, self)
+                    loss, _ = self.evaluate(self.train_loader)
+                    self.scheduler.step()
+                    print("Loss in the epoch", loss)
+                    if loss < self.config["round"]["stopping"] * base_loss:
+                        break
+                    i += 1
             report = self.validate()
             self.model.cpu()
             self.helper.save_model(weights_to_np(self.model.state_dict()), self.global_model_path)
             return report
         except Exception as e:
-            print(e, flush=True)
+            print("Error while running the round ", e, flush=True)
             return {"status": "fail"}
 
 
@@ -136,8 +148,8 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-        target = target.cuda(model_trainer.device)
-        input_var = input.cuda(model_trainer.device)
+        target = target.to(model_trainer.device)
+        input_var = input.to(model_trainer.device)
         target_var = target
         # compute output
         output = model(input_var)
@@ -155,14 +167,14 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if i % 50 == 0:
+        if i % 10 == 0 and i > 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                 epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
-        
+    return losses.avg
 
 
 def validate(val_loader, model, criterion, model_trainer):
@@ -177,9 +189,9 @@ def validate(val_loader, model, criterion, model_trainer):
     end = time.time()
     with torch.no_grad():
         for i, (input, target) in enumerate(val_loader):
-            target = target.cuda(model_trainer.device)
-            input_var = input.cuda(model_trainer.device)
-            target_var = target.cuda(model_trainer.device)
+            target = target.to(model_trainer.device)
+            input_var = input.to(model_trainer.device)
+            target_var = target.to(model_trainer.device)
             # compute output
             output = model(input_var)
             loss = criterion(output, target_var)
@@ -202,7 +214,7 @@ def validate(val_loader, model, criterion, model_trainer):
 
     print(' * Prec@1 {top1.avg:.3f}'
           .format(top1=top1))
-    return top1.avg
+    return top1.avg, losses.avg
 
 
 class AverageMeter(object):
@@ -246,7 +258,7 @@ if __name__ == "__main__":
             print('Failed to read model_config from settings file', flush=True)
             raise e
     print("Setting files loaded successfully !!!")
-    client_config["training"]["cuda_device"] = "cuda:0"
+    client_config["training"]["cuda_device"] = "cpu"
     client_config["training"]["directory"] = "data/clients/" + "1" + "/"
     client_config["training"]["data_path"] = client_config["training"]["directory"] + "data.npz"
     client_config["training"]["global_model_path"] = client_config["training"]["directory"] + "weights.npz"

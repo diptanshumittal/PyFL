@@ -9,6 +9,7 @@ import yaml
 import json
 import socket
 import threading
+import torch
 import requests as r
 from minio import Minio
 from contextlib import closing
@@ -18,9 +19,17 @@ from model.pytorch_model_trainer import PytorchModelTrainer
 parser = argparse.ArgumentParser(description='Federated Learning Client')
 parser.add_argument('--gpu', default='None', type=str,
                     help='GPU device to be used by the client')
+parser.add_argument('--train_samples', default=10000, type=int,
+                    help='GPU device to be used by the client')
+parser.add_argument('--test_samples', default=5000, type=int,
+                    help='GPU device to be used by the client')
 args = parser.parse_args()
-print(args)
-
+opt = vars(args)
+args = yaml.load(open('settings/settings-common.yaml'), Loader=yaml.FullLoader)
+opt.update(args)
+args = opt
+print(dict(args))
+time.sleep(20)
 
 def find_free_port():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
@@ -51,6 +60,7 @@ class Server:
                 retval = r.get(
                     "{}?round_id={}&client_id={}&report={}".format(self.connect_string + '/roundcompletedbyclient',
                                                                    round_id, self.id, report))
+                print(retval.json())
                 if retval.json()['status'] == "Success":
                     print("Round ended successfully and notification received by server successfully", flush=True)
                     return True
@@ -128,13 +138,7 @@ class Server:
 
 
 class Client:
-    def __init__(self, args):
-        with open('settings/settings-common.yaml', 'r') as file:
-            try:
-                client_config = dict(yaml.safe_load(file))
-            except yaml.YAMLError as error:
-                print('Failed to read model_config from settings file', flush=True)
-                raise error
+    def __init__(self, client_config):
         self.training_id = client_config["training"]["data"]["dataset"] + "_" + client_config["training"]["model"]["model_type"] + "_" + \
                            client_config["training"]["optimizer"]["optimizer"] + "_" + client_config["training_identifier"]["id"]
         if not os.path.exists(os.getcwd() + "/data/logs"):
@@ -148,19 +152,9 @@ class Client:
             "port": self.port
         }
         client_config["client"]["training_id"] = self.training_id
-        if args.gpu != "None":
-            client_config["training"]["cuda_device"] = args.gpu
-        elif "CUDA_VISIBLE_DEVICES" in os.environ.keys():
-            print("CUDA_VISIBLE_DEVICES :", os.environ["CUDA_VISIBLE_DEVICES"])
-            if isinstance(os.environ["CUDA_VISIBLE_DEVICES"], list):
-                client_config["training"]["cuda_device"] = "cuda:" + str(os.environ["CUDA_VISIBLE_DEVICES"][0])
-            elif isinstance(os.environ["CUDA_VISIBLE_DEVICES"], str):
-                client_config["training"]["cuda_device"] = "cuda:" + os.environ["CUDA_VISIBLE_DEVICES"][0]
-            else:
-                print(os.environ["CUDA_VISIBLE_DEVICES"])
-        else:
-            raise ValueError("GPU device not set!!")
-
+        client_config["training"]["cuda_device"] = client_config['gpu']
+        client_config["training"]["train_samples"] = client_config['train_samples']
+        client_config["training"]["test_samples"] = client_config['test_samples']
         try:
             storage_config = client_config["storage"]
             assert (storage_config["storage_type"] == "S3")
@@ -196,7 +190,6 @@ class Client:
                 raise ValueError("Not able to connect to the server")
         except Exception as e:
             print(e)
-
         sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
         client_config["training"]["directory"] = "data/clients/" + self.client_id[-1] + "/"
         if not os.path.exists("data/clients/"):
