@@ -31,4 +31,4 @@ training:
     stopping: 0.9
     type: fedprocx
 training_identifier:
-  id: '44'
+  id: '45'

@@ -9,9 +9,7 @@ import collections
 import time
 from torch.utils.data import DataLoader
 from helper.pytorch.pytorch_helper import PytorchHelper
-from helper.pytorch.lr_scheduler import CosineAnnealingLR, MultiStepLR
 from model.pytorch.pytorch_models import create_seed_model
-import model.pytorch.googlenet as googlenet
 
 
 def weights_to_np(weights):
@@ -31,6 +29,7 @@ def np_to_weights(weights_np):
 class PytorchModelTrainer:
     def __init__(self, config):
         self.helper = PytorchHelper()
+        self.stop_event = threading.Event()
         self.global_model_path = config["global_model_path"]
         self.model, self.loss, self.optimizer, self.scheduler = create_seed_model(config)
         self.device = torch.device(config["cuda_device"])
@@ -52,6 +51,8 @@ class PytorchModelTrainer:
         correct = 0
         with torch.no_grad():
             for x, y in dataloader:
+                if self.stop_event.is_set():
+                    raise ValueError("Round stop requested by the reducer!!!")
                 x, y = x.to(self.device), y.to(self.device)
                 output = self.model(x)
                 loss += self.loss(output, y).item() * x.size(0)
@@ -100,14 +101,15 @@ class PytorchModelTrainer:
     #         # print(self.optimizer.param_groups[0]["lr"])
     #     # print("-- TRAINING COMPLETED --", flush=True)
 
-    def start_round(self, round_config):
+    def start_round(self, round_config, stop_event):
+        self.stop_event = stop_event
         try:
             self.model.load_state_dict(np_to_weights(self.helper.load_model(self.global_model_path)))
             self.model.to(self.device)
             if self.round_type == "fedavg":
                 for i in range(round_config['epochs']):
                     print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
-                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
+                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1,)
                     self.scheduler.step()
                     if self.stop_event.is_set():
                         raise Exception("Stop requested")
@@ -125,6 +127,8 @@ class PytorchModelTrainer:
                     if loss < self.config["round"]["stopping"] * base_loss:
                         break
                     i += 1
+                    if self.stop_event.is_set():
+                        raise Exception("Stop requested")
             report = self.validate()
             self.model.cpu()
             self.helper.save_model(weights_to_np(self.model.state_dict()), self.global_model_path)
@@ -147,6 +151,8 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
+        if model_trainer.stop_event.is_set():
+            raise ValueError("Round stop requested by the reducer!!!")
         data_time.update(time.time() - end)
         target = target.to(model_trainer.device)
         input_var = input.to(model_trainer.device)
