@@ -60,7 +60,6 @@ class Server:
                 retval = r.get(
                     "{}?round_id={}&client_id={}&report={}".format(self.connect_string + '/roundcompletedbyclient',
                                                                    round_id, self.id, report))
-                print(retval.json())
                 if retval.json()['status'] == "Success":
                     print("Round ended successfully and notification received by server successfully", flush=True)
                     return True
@@ -191,7 +190,7 @@ class Client:
         except Exception as e:
             print(e)
         sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
-        client_config["training"]["directory"] = "data/clients/" + self.client_id[-1] + "/"
+        client_config["training"]["directory"] = "data/clients/" + self.client_id + "/"
         if not os.path.exists("data/clients/"):
             os.mkdir("data/clients/")
         if not os.path.exists(client_config["training"]["directory"]):

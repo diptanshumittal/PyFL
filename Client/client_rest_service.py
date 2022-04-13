@@ -51,6 +51,7 @@ class ClientRestService:
                 "global_model": request.args.get('global_model', None),
                 "epochs": int(request.args.get('epochs', "1"))
             }
+            self.stop_round_event = threading.Event()
             self.round_thread = threading.Thread(target=self.run_round, args=(config,))
             self.stop_round_event.clear()
             self.round_thread.start()
@@ -75,7 +76,13 @@ class ClientRestService:
         try:
             pre = time.time()
             print("Running round - ", config["round_id"], flush=True)
-            self.minio_client.fget_object('fedn-context', config["global_model"], self.global_model_path)
+            try:
+                print("Downloading the global model", flush=True)
+                self.minio_client.fget_object('fedn-context', config["global_model"], self.global_model_path)
+            except Exception as e:
+                print("Error occured while downloading the global model", e)
+                raise ValueError("Not able to download the global model")
+            print("Global model downloaded successfully", flush=True)
             report = self.model_trainer.start_round({"epochs": config["epochs"]}, self.stop_round_event)
             if report["status"] != "fail":
                 self.minio_client.fput_object(config["bucket_name"], str(uuid.uuid4()) + ".npz", self.global_model_path)

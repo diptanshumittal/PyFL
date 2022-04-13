@@ -1,7 +1,7 @@
 storage:
   storage_config:
     storage_access_key: minioadmin
-    storage_hostname: 192.168.64.187
+    storage_hostname: 10.0.0.22
     storage_port: 9000
     storage_secret_key: minioadmin
     storage_secure_mode: false
@@ -14,7 +14,7 @@ training:
   lr_scheduler:
     baseline_lr: 0.1
     gamma: 0.1
-    lrmilestone: 30 60 90
+    lrmilestone: 100 200 300
     type: multistep
   model:
     model_type: resnet20
@@ -28,7 +28,8 @@ training:
     value: 30
     weight_decay: 0.0001
   round:
-    stopping: 0.9
+    gamma: 0.95
+    mu: 0.001
     type: fedprocx
 training_identifier:
-  id: '45'
+  id: '57'

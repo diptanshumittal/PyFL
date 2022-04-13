@@ -104,23 +104,24 @@ class ReducerRestService:
                 print("Connected clients are ", list(self.clients.keys()), flush=True)
             time.sleep(10)
 
+    def send_round_stop_request(self):
+        executor = ThreadPoolExecutor(max_workers=10)
+        pending_jobs = []
+        for _, client in self.clients.items():
+            if client.status != "Idle":
+                pending_jobs.append(executor.submit(client.send_round_stop_request))
+        while len(pending_jobs) > 0:
+            print("Sending round stop requests to the clients")
+            time.sleep(1)
+            pending_jobs = remove_pending_jobs(pending_jobs)
+
     def stop_training(self):
         """
         Method for stopping the training across all the clients upon admin request.
         :return:
         """
         self.stop_training_event.set()
-        executor = ThreadPoolExecutor(max_workers=10)
-        pending_jobs = []
-        for _, client in self.clients.items():
-            if client.status == "Idle":
-                continue
-            pending_jobs.append(
-                executor.submit(client.send_round_stop_request))
-        while len(pending_jobs) > 0:
-            print("Sending round stop requests to the clients")
-            pending_jobs = remove_pending_jobs(pending_jobs)
-            time.sleep(5)
+        self.send_round_stop_request()
         self.training.join()
         assert self.get_clients_training() == 0
         self.rounds -= 1
@@ -158,16 +159,16 @@ class ReducerRestService:
                 available_id = "client_" + str(self.unique_clients)
                 self.clients[name + ":" + port] = Client(name, port, self.rounds, available_id)
                 print("Connected clients are ", list(self.clients.keys()), flush=True)
-                if len(self.clients) > 10:
-                    config = {
-                        "rounds": 200,
-                        "round_time": 2000000,
-                        "epochs": 2
-                    }
-                    self.stop_training_event.clear()
-                    self.training = threading.Thread(target=self.train, args=(config,))
-                    self.training.start()
-                    self.status = "Training"
+                # if len(self.clients) > 10:
+                #     config = {
+                #         "rounds": 200,
+                #         "round_time": 2000000,
+                #         "epochs": 2
+                #     }
+                #     self.stop_training_event.clear()
+                #     self.training = threading.Thread(target=self.train, args=(config,))
+                #     self.training.start()
+                #     self.status = "Training"
                 return jsonify({
                     'status': "added",
                     'id': available_id
@@ -253,9 +254,9 @@ class ReducerRestService:
                         writer.add_scalar('test_accuracy', res["test_accuracy"], round_id)
                         writer.add_scalar('round_time', res["round_time"], round_id)
                         writer.close()
-                        print("Client - ", id, " successfully completed round ", round_id, flush=True)
+                        print(self.clients[id].id, "successfully completed the round", round_id, flush=True)
                     else:
-                        print("Client - ", id, " unsuccessfully completed round ", round_id, flush=True)
+                        print(self.clients[id].id, "unsuccessfully completed the round", round_id, flush=True)
                 return jsonify({'status': "Success"})
             return jsonify({'status': "Failure"})
 
@@ -267,7 +268,9 @@ class ReducerRestService:
             id = request.args.get("client_id", "0")
             if self.rounds == round_id and id in self.clients:
                 self.clients[id].status = "Idle"
-                print("Client - ", id, " stopped round ", round_id, flush=True)
+                print(self.clients[id].id, "stopped round", round_id, flush=True)
+                return jsonify({'status': "Success"})
+            if self.rounds > round_id:
                 return jsonify({'status': "Success"})
             return jsonify({'status': "Failure"})
 
@@ -311,7 +314,7 @@ class ReducerRestService:
             if self.stop_training_event.is_set():
                 return
             self.rounds += 1
-            print("Round ---", self.rounds, "---", flush=True)
+            print("\n\n\n\nRound ------ ", self.rounds, " ------", flush=True)
             bucket_name = "round" + str(self.rounds)
             self.bucket_setup(bucket_name)
             self.send_start_request(bucket_name, config)
@@ -382,6 +385,17 @@ class ReducerRestService:
             if client_training < total_clients_in_training:
                 print("Clients in Training : " + str(client_training), flush=True)
                 total_clients_in_training = client_training
-            if total_clients_in_training == 0 or int(round_time) > config["round_time"]:
+            if total_clients_in_training <= int(0.1*total_clients_started_training) or int(round_time) > config["round_time"]:
+                print("Stopping the round", flush=True)
+                self.send_round_stop_request() 
                 break
             time.sleep(2)
+        while True:
+            client_training = self.get_clients_training()
+            if client_training < total_clients_in_training:
+                print("Clients in Training : " + str(client_training), flush=True)
+                total_clients_in_training = client_training
+            if total_clients_in_training == 0 :
+                break
+            time.sleep(2)
+        print("Round ended\nStarting Aggregation", flush=True)

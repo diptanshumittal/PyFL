@@ -1,5 +1,7 @@
+from copy import deepcopy
 import os
 import sys
+import this
 
 sys.path.append(os.getcwd())
 import yaml
@@ -104,11 +106,18 @@ class PytorchModelTrainer:
     def start_round(self, round_config, stop_event):
         self.stop_event = stop_event
         try:
-            self.model.load_state_dict(np_to_weights(self.helper.load_model(self.global_model_path)))
-            self.model.to(self.device)
+            try:
+                print("Loading global model", flush=True)
+                self.model.load_state_dict(np_to_weights(self.helper.load_model(self.global_model_path)))
+                self.global_model = deepcopy(self.model)
+                self.model.to(self.device)
+            except Exception as e:
+                print("Error while loading global model",e)
+                raise ValueError("Not able to load global model")
+            print("Loaded global model successfully on", self.device, flush=True)
             if self.round_type == "fedavg":
                 for i in range(round_config['epochs']):
-                    print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
+                    print('Running epoch {} with LR {:.5e}'.format(i,self.optimizer.param_groups[0]['lr']), flush=True)
                     train(self.train_loader, self.model, self.loss, self.optimizer, i + 1,)
                     self.scheduler.step()
                     if self.stop_event.is_set():
@@ -116,15 +125,16 @@ class PytorchModelTrainer:
             elif self.round_type == "fedprocx":
                 base_loss, base_acc = self.evaluate(self.train_loader)
                 i = 1
-                print("Base training loss = ", base_loss, " threshold = ",
-                      (self.config["round"]["stopping"] * base_loss), flush=True)
+                thresh = self.config["round"]["gamma"] * (base_loss + self.config["round"]["mu"] * sum((y-x).abs().sum() for x, y in zip(self.global_model.state_dict().values(), self.model.state_dict().values())))
+                print("Base training loss = ", base_loss, " threshold = ",thresh, flush=True)
                 while True:
-                    print('current lr {:.5e}'.format(self.optimizer.param_groups[0]['lr']), flush=True)
+                    print('Running epoch {} with LR {:.5e}'.format(i,self.optimizer.param_groups[0]['lr']), flush=True)
                     train(self.train_loader, self.model, self.loss, self.optimizer, i, self)
                     loss, _ = self.evaluate(self.train_loader)
+                    loss += self.config["round"]["mu"] * sum((y-x).sum() for x, y in zip(self.global_model.state_dict().values(), self.model.state_dict().values()))
                     self.scheduler.step()
                     print("Loss in the epoch", loss)
-                    if loss < self.config["round"]["stopping"] * base_loss:
+                    if loss < thresh:
                         break
                     i += 1
                     if self.stop_event.is_set():
@@ -173,13 +183,13 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if i % 10 == 0 and i > 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
+        # if i % 10 == 0 and i > 0:
+        #     print('Epoch: [{0}][{1}/{2}]\t'
+        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+        #           'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+        #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+        #           'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+        #         epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
     return losses.avg
 
 
