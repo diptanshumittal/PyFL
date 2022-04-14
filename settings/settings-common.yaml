@@ -9,7 +9,7 @@ storage:
 training:
   data:
     batch_size: 128
-    dataset: cifar10
+    dataset: mnist
   loss: cross_entropy
   lr_scheduler:
     baseline_lr: 0.1
@@ -17,7 +17,7 @@ training:
     lrmilestone: 100 200 300
     type: multistep
   model:
-    model_type: resnet20
+    model_type: net
   optimizer:
     learning_rate: 0.1
     mode: initialization
@@ -30,6 +30,6 @@ training:
   round:
     gamma: 0.95
     mu: 0.001
-    type: fedprocx
+    type: fedavg
 training_identifier:
   id: '57'

@@ -37,14 +37,16 @@ class PytorchModelTrainer:
         self.device = torch.device(config["cuda_device"])
         self.loss = self.loss.to(self.device)
         self.model.to(self.device)
-        self.round_type = config["round"]["type"]
+        self.round_type = "fedavg" # config["round"]["type"]
         self.config = config
         print("Device being used for training :", self.device, flush=True)
         print("Loading dataset")
-        self.train_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], config["train_samples"], True),
-                                       batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
-        self.test_loader = DataLoader(self.helper.read_data(config["data"]["dataset"], config["data_path"], config["test_samples"], False),
-                                      batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
+        self.train_loader = DataLoader(
+            self.helper.read_data(config["data"]["dataset"], config["data_path"], config["train_samples"], True),
+            batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
+        self.test_loader = DataLoader(
+            self.helper.read_data(config["data"]["dataset"], config["data_path"], config["test_samples"], False),
+            batch_size=int(config["data"]['batch_size']), shuffle=True, pin_memory=True)
         print("Dataset loaded")
 
     def evaluate(self, dataloader):
@@ -112,33 +114,35 @@ class PytorchModelTrainer:
                 self.global_model = deepcopy(self.model)
                 self.model.to(self.device)
             except Exception as e:
-                print("Error while loading global model",e)
+                print("Error while loading global model", e)
                 raise ValueError("Not able to load global model")
             print("Loaded global model successfully on", self.device, flush=True)
             if self.round_type == "fedavg":
                 for i in range(round_config['epochs']):
-                    print('Running epoch {} with LR {:.5e}'.format(i,self.optimizer.param_groups[0]['lr']), flush=True)
-                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1,)
+                    print('Running epoch {} with LR {:.5e}'.format(i, self.optimizer.param_groups[0]['lr']), flush=True)
+                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
                     self.scheduler.step()
                     if self.stop_event.is_set():
                         raise Exception("Stop requested")
-            elif self.round_type == "fedprocx":
-                base_loss, base_acc = self.evaluate(self.train_loader)
-                i = 1
-                thresh = self.config["round"]["gamma"] * (base_loss + self.config["round"]["mu"] * sum((y-x).abs().sum() for x, y in zip(self.global_model.state_dict().values(), self.model.state_dict().values())))
-                print("Base training loss = ", base_loss, " threshold = ",thresh, flush=True)
-                while True:
-                    print('Running epoch {} with LR {:.5e}'.format(i,self.optimizer.param_groups[0]['lr']), flush=True)
-                    train(self.train_loader, self.model, self.loss, self.optimizer, i, self)
-                    loss, _ = self.evaluate(self.train_loader)
-                    loss += self.config["round"]["mu"] * sum((y-x).sum() for x, y in zip(self.global_model.state_dict().values(), self.model.state_dict().values()))
-                    self.scheduler.step()
-                    print("Loss in the epoch", loss)
-                    if loss < thresh:
-                        break
-                    i += 1
-                    if self.stop_event.is_set():
-                        raise Exception("Stop requested")
+            # elif self.round_type == "fedprocx":
+            #     base_loss, base_acc = self.evaluate(self.train_loader)
+            #     i = 1
+            #     thresh = self.config["round"]["gamma"] * base_loss
+            #     print("Base training loss = ", base_loss, " threshold = ", thresh, flush=True)
+            #     while True:
+            #         print('Running epoch {} with LR {:.5e}'.format(i, self.optimizer.param_groups[0]['lr']), flush=True)
+            #         train(self.train_loader, self.model, self.loss, self.optimizer, i, self)
+            #         loss, _ = self.evaluate(self.train_loader)
+            #         loss += self.config["round"]["mu"] * sum((y - x).sum() for x, y in
+            #                                                  zip(self.global_model.state_dict().values(),
+            #                                                      self.model.state_dict().values()))
+            #         self.scheduler.step()
+            #         print("Loss in the epoch", loss)
+            #         if loss < thresh:
+            #             break
+            #         i += 1
+            #         if self.stop_event.is_set():
+            #             raise Exception("Stop requested")
             report = self.validate()
             self.model.cpu()
             self.helper.save_model(weights_to_np(self.model.state_dict()), self.global_model_path)
