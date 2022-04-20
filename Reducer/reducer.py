@@ -45,12 +45,6 @@ def run_tensorboard(config):
 class Reducer:
     def __init__(self):
         """ """
-        with open(os.getcwd() + "/settings/settings-reducer.yaml", 'r') as file:
-            try:
-                fedn_config = dict(yaml.safe_load(file))
-            except yaml.YAMLError as e:
-                print('Failed to read config from settings file, exiting.', flush=True)
-                raise e
         with open(os.getcwd() + "/settings/settings-common.yaml", 'r') as file:
             try:
                 common_config = dict(yaml.safe_load(file))
@@ -66,25 +60,25 @@ class Reducer:
             os.mkdir(os.getcwd() + "/data/logs")
         if not os.path.exists(os.getcwd() + "/data/logs/" + self.training_id):
             os.mkdir(os.getcwd() + "/data/logs/" + self.training_id)
-        sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/reducer.txt", "w")
+        # sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/reducer.txt", "w")
         self.buckets = ["fedn-context"]
         self.port = find_free_port()
 
-        if not os.path.exists(fedn_config["tensorboard"]["path"]):
-            os.mkdir(fedn_config["tensorboard"]["path"])
-        Process(target=run_tensorboard, args=(fedn_config["tensorboard"],), daemon=True).start()
-        try:
-            if not os.path.exists(os.getcwd() + '/data/reducer'):
-                os.mkdir(os.getcwd() + '/data/reducer')
-            self.global_model = "initial_model.npz"
-            self.global_model_path = os.getcwd() + '/data/reducer/initial_model.npz'
-            model, loss, optimizer, _ = create_seed_model(common_config["training"])
-            helper = PytorchHelper()
-            helper.save_model(weights_to_np(model.state_dict()), self.global_model_path)
-        except Exception as e:
-            print("Error while creating seed model : ", e)
-            raise e
-        print("Seed model created successfully !!")
+        if not os.path.exists(common_config["tensorboard"]["path"]):
+            os.mkdir(common_config["tensorboard"]["path"])
+        Process(target=run_tensorboard, args=(common_config["tensorboard"],), daemon=True).start()
+        # try:
+        #     if not os.path.exists(os.getcwd() + '/data/reducer'):
+        #         os.mkdir(os.getcwd() + '/data/reducer')
+        #     self.global_model = "initial_model.npz"
+        #     self.global_model_path = os.getcwd() + '/data/reducer/initial_model.npz'
+        #     model, loss, optimizer, _ = create_seed_model(common_config["training"])
+        #     helper = PytorchHelper()
+        #     helper.save_model(weights_to_np(model.state_dict()), self.global_model_path)
+        # except Exception as e:
+        #     print("Error while creating seed model : ", e)
+        #     raise e
+        # print("Seed model created successfully !!")
         try:
             storage_config = common_config["storage"]
             assert (storage_config["storage_type"] == "S3")
@@ -102,20 +96,25 @@ class Reducer:
             reducer_config_as_a_stream = io.BytesIO(reducer_config_as_bytes)
             self.minio_client.put_object(self.buckets[0], "reducer_config.txt", reducer_config_as_a_stream,
                                          length=reducer_config_as_a_stream.getbuffer().nbytes)
-            self.minio_client.fput_object(self.buckets[0], self.global_model, self.global_model_path)
-            print("Address - http://", get_local_ip(), ":", self.port)
+            # self.minio_client.fput_object(self.buckets[0], self.global_model, self.global_model_path)
+            print("Address - http://", get_local_ip(), ":", self.port, sep="")
         except Exception as e:
             print(e)
             print("Error while setting up minio configuration")
             exit()
+        print("Minio setup successfully")
 
         config = {
             "flask_port": self.port,
-            "global_model": self.global_model,
-            "tensorboard_path": fedn_config["tensorboard"]["path"],
+            "tensorboard_path": common_config["tensorboard"]["path"],
             "training_id": self.training_id
         }
-        self.rest = ReducerRestService(self.minio_client, config)
+        try:
+            print("Initializing rest service class")
+            self.rest = ReducerRestService(self.minio_client, config, common_config)
+        except Exception as e:
+            print("Error while setting up rest service ", e)
+            exit()
 
     def run(self):
         # threading.Thread(target=self.control_loop, daemon=True).start()

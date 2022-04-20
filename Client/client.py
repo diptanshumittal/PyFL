@@ -19,7 +19,7 @@ from model.pytorch_model_trainer import PytorchModelTrainer
 parser = argparse.ArgumentParser(description='Federated Learning Client')
 parser.add_argument('--gpu', default='None', type=str,
                     help='GPU device to be used by the client')
-parser.add_argument('--train_samples', default=10000, type=int,
+parser.add_argument('--train_samples', default=20000, type=int,
                     help='GPU device to be used by the client')
 parser.add_argument('--test_samples', default=5000, type=int,
                     help='GPU device to be used by the client')
@@ -189,7 +189,7 @@ class Client:
                 raise ValueError("Not able to connect to the server")
         except Exception as e:
             print(e)
-        sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
+        # sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
         client_config["training"]["directory"] = "data/clients/" + self.client_id + "/"
         if not os.path.exists("data/clients/"):
             os.mkdir("data/clients/")

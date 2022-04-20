@@ -1,14 +1,18 @@
 storage:
   storage_config:
     storage_access_key: minioadmin
-    storage_hostname: 10.0.0.22
+    storage_hostname: 192.168.55.147
     storage_port: 9000
     storage_secret_key: minioadmin
     storage_secure_mode: false
   storage_type: S3
+tensorboard:
+  path: data/runs
+  port: 6090
 training:
   data:
     batch_size: 128
+    data_path: /
     dataset: mnist
   loss: cross_entropy
   lr_scheduler:
@@ -22,7 +26,7 @@ training:
     learning_rate: 0.1
     mode: initialization
     momentum: 0.9
-    optimizer: SGD
+    optimizer: SFW
     ord: 2
     rescale: gradient
     value: 30
@@ -32,4 +36,4 @@ training:
     mu: 0.001
     type: fedavg
 training_identifier:
-  id: '57'
+  id: '103'

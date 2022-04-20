@@ -1,17 +1,25 @@
+import collections
 import os
 import time
 import uuid
 import json
 import logging
 import threading
+from copy import deepcopy
+
 import numpy as np
 import requests as r
 import matplotlib.pyplot as plt
 from flask import Flask, jsonify, request
 from flask_autodoc.autodoc import Autodoc
+from torch.utils.data import DataLoader
+
 from helper.pytorch.pytorch_helper import PytorchHelper
 from torch.utils.tensorboard import SummaryWriter
 from concurrent.futures import ThreadPoolExecutor
+
+from model.pytorch.pytorch_models import create_seed_model
+from model.pytorch_model_trainer import weights_to_np, grad_to_np, np_to_weights
 
 
 class Client:
@@ -73,12 +81,17 @@ def remove_pending_jobs(pending_jobs):
 
 
 class ReducerRestService:
-    def __init__(self, minio_client, config):
+    def __init__(self, minio_client, config, common_config):
+        self.momentum_change = None
+        self.global_momentum = None
+        self.global_model = None
+        self.helper = PytorchHelper()
+        self.train_loader = None
         self.minio_client = minio_client
+        self.common_config = common_config
         self.port = config['flask_port']
         self.clients = {}
         self.rounds = 0
-        self.global_model = config["global_model"]
         self.clients_updated = 0
         self.tensorboard_path = config["tensorboard_path"]
         self.training = None
@@ -87,7 +100,14 @@ class ReducerRestService:
         self.unique_clients = 0
         self.training_id = config["training_id"]
         self.training_process = None
+        self.model, self.loss, self.optimizer, _ = create_seed_model(self.common_config["training"])
+        self.train_loader = DataLoader(
+            self.helper.read_data(self.common_config["training"]["data"]["dataset"],
+                                  self.common_config["training"]["data"]["data_path"],
+                                  int(self.common_config["training"]["data"]['batch_size']), True),
+            batch_size=int(self.common_config["training"]["data"]['batch_size']), shuffle=True, pin_memory=True)
         threading.Thread(target=self.remove_disconnected_clients, daemon=True).start()
+        self.initial_setup()
 
     def remove_disconnected_clients(self):
         """
@@ -291,6 +311,7 @@ class ReducerRestService:
                     'status': "Not Available"
                 }
                 return jsonify(ret)
+
         app.run(host="0.0.0.0", port=self.port)
 
     def get_clients_training(self):
@@ -324,6 +345,26 @@ class ReducerRestService:
               flush=True)
         self.status = "Idle"
 
+    def initial_setup(self):
+        model_name = "initial_model.npz"
+        self.momentum_change = self.get_grad()
+        self.global_momentum = deepcopy(self.momentum_change)
+        model = weights_to_np(self.model.state_dict())
+        model["momentum"] = grad_to_np(self.global_momentum)
+        model["momentum_change"] = grad_to_np(self.momentum_change)
+        self.helper.save_model(model, model_name)
+        self.minio_client.fput_object("fedn-context", model_name, model_name)
+        self.global_model = model_name
+        os.remove(model_name)
+
+    def get_grad(self):
+        for x, y in self.train_loader:
+            self.optimizer.zero_grad()
+            output = self.model(x)
+            error = self.loss(output, y)
+            error.backward()
+        return self.optimizer.get_grad()
+
     def bucket_setup(self, bucket_name):
         if self.minio_client.bucket_exists(bucket_name):
             for obj in self.minio_client.list_objects(bucket_name):
@@ -333,9 +374,9 @@ class ReducerRestService:
 
     def aggregate_updates(self, bucket_name):
         model = None
-        helper = PytorchHelper()
+        momentum = None
         self.minio_client.fget_object('fedn-context', self.global_model, self.global_model)
-        base_model = helper.load_model(self.global_model)
+        base_model, _, _ = self.helper.load_model(self.global_model)
         os.remove(self.global_model)
         reducer_learning_rate = 1
         processed_model = 0
@@ -343,19 +384,27 @@ class ReducerRestService:
             if self.stop_training_event.is_set():
                 break
             self.minio_client.fget_object(bucket_name, obj.object_name, obj.object_name)
+            temp_model, temp_momentum = self.helper.load_model(obj.object_name)
+
             if processed_model == 0:
-                model = helper.get_tensor_diff(helper.load_model(obj.object_name), base_model)
+                print(temp_model.keys(), base_model.keys())
+                model = self.helper.get_tensor_diff(temp_model, base_model)
+                momentum = temp_momentum
             else:
-                model = helper.increment_average(model, helper.get_tensor_diff(helper.load_model(obj.object_name),
-                                                                               base_model),
-                                                 processed_model + 1)
+                model = self.helper.increment_average(model, self.helper.get_tensor_diff(temp_model,
+                                                                                         base_model),
+                                                      processed_model + 1)
+                momentum = self.helper.increment_average(momentum, temp_momentum, processed_model + 1)
             processed_model += 1
             os.remove(obj.object_name)
-
         if model is not None and not self.stop_training_event.is_set():
-            model = helper.add_base_model(model, base_model, reducer_learning_rate)
+            model = self.helper.add_base_model(model, base_model, reducer_learning_rate)
+            self.model.load_state_dict(np_to_weights(model))
+            self.momentum_change = self.get_grad()
             model_name = str(uuid.uuid4()) + ".npz"
-            helper.save_model(model, model_name)
+            model["momentum"] = momentum
+            model["momentum_change"] = grad_to_np(self.momentum_change)
+            self.helper.save_model(model, model_name)
             self.minio_client.fput_object("fedn-context", model_name, model_name)
             self.global_model = model_name
             os.remove(model_name)
@@ -385,9 +434,10 @@ class ReducerRestService:
             if client_training < total_clients_in_training:
                 print("Clients in Training : " + str(client_training), flush=True)
                 total_clients_in_training = client_training
-            if total_clients_in_training <= int(0.1*total_clients_started_training) or int(round_time) > config["round_time"]:
+            if total_clients_in_training <= int(0.1 * total_clients_started_training) or int(round_time) > config[
+                "round_time"]:
                 print("Stopping the round", flush=True)
-                self.send_round_stop_request() 
+                self.send_round_stop_request()
                 break
             time.sleep(2)
         while True:
@@ -395,7 +445,7 @@ class ReducerRestService:
             if client_training < total_clients_in_training:
                 print("Clients in Training : " + str(client_training), flush=True)
                 total_clients_in_training = client_training
-            if total_clients_in_training == 0 :
+            if total_clients_in_training == 0:
                 break
             time.sleep(2)
         print("Round ended\nStarting Aggregation", flush=True)

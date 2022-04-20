@@ -1,6 +1,3 @@
-# import os
-# import tempfile
-# from functools import reduce
 import os
 import pickle
 from collections import OrderedDict
@@ -19,36 +16,62 @@ class PytorchHelper:
 
     def increment_average(self, model, model_next, n):
         """ Update an incremental average. """
+        if type(model) == list:
+            w = []
+            for i in range(len(model)):
+                temp = OrderedDict()
+                for name in model[i].keys():
+                    tensor_diff = model_next[i][name] - model[i][name]
+                    temp[name] = model[i][name] + tensor_diff / n
+                w.append(temp)
+            return w
         w = OrderedDict()
         for name in model.keys():
-            tensorDiff = model_next[name] - model[name]
-            w[name] = model[name] + tensorDiff / n
+            tensor_diff = model_next[name] - model[name]
+            w[name] = model[name] + tensor_diff / n
         return w
 
     def get_tensor_diff(self, model, base_model):
         w = OrderedDict()
-        for name in model.keys():
+        for name in model:
             w[name] = model[name] - base_model[name]
         return w
 
     def add_base_model(self, tensordiff, base_model, learning_rate):
         w = OrderedDict()
-        for name in tensordiff.keys():
+        for name in tensordiff:
             w[name] = learning_rate * tensordiff[name] + base_model[name]
         return w
 
     def save_model(self, weights_dict, path=None):
+        # import pickle
+        # with open(path, "wb") as tf:
+        #     pickle.dump(weights_dict, tf)
         if not path:
             path = self.get_tmp_path()
         np.savez_compressed(path, **weights_dict)
         return path
 
-    def load_model(self, path="weights.npz"):
-        b = np.load(path)
+    def load_model(self, path=None):
+        # import pickle
+        # with open("initial_model.pkl", "rb") as tf:
+        #     b = pickle.load(tf)
+        #     print(type(b))
+        b = np.load(path, allow_pickle=True)
+        # print(list(b.keys()))
+        # if "momentum_change" in b.keys():
+        #     return b["model"], b["momentum"], b["momentum_change"]
+        # return b["model"], b["momentum"]
         weights_np = OrderedDict()
         for i in b.files:
             weights_np[i] = b[i]
-        return weights_np
+        momentum = weights_np["momentum"]
+        weights_np.pop("momentum")
+        if "momentum_change" in weights_np.keys():
+            momentum_change = weights_np["momentum_change"]
+            weights_np.pop("momentum_change")
+            return weights_np, momentum, momentum_change
+        return weights_np, momentum
 
     def read_data(self, dataset, data_path, samples, trainset):
         if dataset == "imagenet":

@@ -1,6 +1,6 @@
 from torch import nn
 import torch.nn.functional as F
-from helper.pytorch.optimizers import SFW
+from helper.pytorch.optimizers import SFW, SFWDistributed
 from helper.pytorch.constraints import *
 import model.pytorch.resnet as resnet
 import model.pytorch.googlenet as googlenet
@@ -35,7 +35,7 @@ def create_seed_model(config):
         cf = config["optimizer"]
         constraints = create_lp_constraints(model, ord=float(cf["ord"]), value=int(cf["value"]),
                                             mode=cf["mode"])
-        optimizer = SFW(model.parameters(), constraints=constraints, learning_rate=float(cf["learning_rate"]),
+        optimizer = SFWDistributed(model.parameters(), constraints=constraints, learning_rate=float(cf["learning_rate"]),
                         momentum=float(cf["momentum"]), rescale=cf["rescale"],
                         weight_decay=float(cf["weight_decay"]))
         make_feasible(model, constraints)

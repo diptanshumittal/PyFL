@@ -1,7 +1,6 @@
 from copy import deepcopy
 import os
 import sys
-import this
 
 sys.path.append(os.getcwd())
 import yaml
@@ -12,7 +11,6 @@ import time
 from torch.utils.data import DataLoader
 from helper.pytorch.pytorch_helper import PytorchHelper
 from model.pytorch.pytorch_models import create_seed_model
-
 
 def weights_to_np(weights):
     weights_np = collections.OrderedDict()
@@ -28,8 +26,29 @@ def np_to_weights(weights_np):
     return weights
 
 
+def grad_to_np(grad_tensor):
+    grad_np = []
+    for i in range(len(grad_tensor)):
+        temp = collections.OrderedDict()
+        for w in grad_tensor[i]:
+            temp[w] = grad_tensor[i][w].cpu().detach().numpy().tolist()
+        grad_np.append(temp)
+    return grad_np
+
+
+def np_to_grad(grad_np, device="cpu"):
+    grad_tensor = []
+    for i in range(len(grad_np)):
+        temp = collections.OrderedDict()
+        for w in grad_np[i]:
+            temp[w] = torch.tensor(grad_np[i][w]).to(device)
+        grad_tensor.append(temp)
+    return grad_tensor
+
+
 class PytorchModelTrainer:
     def __init__(self, config):
+        self.global_momentum = None
         self.helper = PytorchHelper()
         self.stop_event = threading.Event()
         self.global_model_path = config["global_model_path"]
@@ -37,8 +56,9 @@ class PytorchModelTrainer:
         self.device = torch.device(config["cuda_device"])
         self.loss = self.loss.to(self.device)
         self.model.to(self.device)
-        self.round_type = "fedavg" # config["round"]["type"]
+        self.round_type = "fedavg"  # config["round"]["type"]
         self.config = config
+        self.momentum_change = None
         print("Device being used for training :", self.device, flush=True)
         print("Loading dataset")
         self.train_loader = DataLoader(
@@ -85,45 +105,48 @@ class PytorchModelTrainer:
         print("-- VALIDATION COMPLETED --", flush=True)
         return report
 
-    #
-    # def train(self, settings):
-    #     # print("-- RUNNING TRAINING --", flush=True)
-    #     self.model.train()
-    #     for i in range(settings['epochs']):
-    #         for x, y in self.train_loader:
-    #             x, y = x.to(self.device), y.to(self.device)
-    #             self.optimizer.zero_grad()
-    #             if isinstance(self.model, googlenet.GoogLeNet):
-    #                 outputs, aux1, aux2 = self.model(x)
-    #                 error = self.loss(outputs, y) + 0.3 * self.loss(aux1, y) + 0.3 * self.loss(aux2, y)
-    #             else:
-    #                 output = self.model(x)
-    #                 error = self.loss(output, y)
-    #             error.backward()
-    #             self.optimizer.step()
-    #         self.scheduler.step()
-    #         # print(self.optimizer.param_groups[0]["lr"])
-    #     # print("-- TRAINING COMPLETED --", flush=True)
+    def train(self, settings):
+        print("---- RUNNING TRAINING ----", flush=True)
+        self.model.train()
+        for i in range(settings['epochs']):
+            for x, y in self.train_loader:
+                if self.stop_event.is_set():
+                    raise ValueError("Round stop requested by the reducer!!!")
+                x, y = x.to(self.device), y.to(self.device)
+                self.optimizer.step(self.global_momentum)
+                self.optimizer.zero_grad()
+                output = self.model(x)
+                error = self.loss(output, y)
+                error.backward()
+                self.global_momentum, self.momentum_change = self.optimizer.update_momentum(self.global_momentum,
+                                                                                            self.momentum_change)
+            self.scheduler.step()
+        print("---- TRAINING COMPLETED ----", flush=True)
 
     def start_round(self, round_config, stop_event):
         self.stop_event = stop_event
         try:
             try:
                 print("Loading global model", flush=True)
-                self.model.load_state_dict(np_to_weights(self.helper.load_model(self.global_model_path)))
-                self.global_model = deepcopy(self.model)
+                model, momentum, momentum_change = self.helper.load_model(self.global_model_path)
+                self.global_momentum = np_to_grad(momentum, self.device)
+                self.momentum_change = np_to_grad(momentum_change, self.device)
+                self.model.load_state_dict(np_to_weights(model))
+                print("Conversion sucess")
+                # self.global_model = deepcopy(self.model)
                 self.model.to(self.device)
             except Exception as e:
                 print("Error while loading global model", e)
                 raise ValueError("Not able to load global model")
             print("Loaded global model successfully on", self.device, flush=True)
-            if self.round_type == "fedavg":
-                for i in range(round_config['epochs']):
-                    print('Running epoch {} with LR {:.5e}'.format(i, self.optimizer.param_groups[0]['lr']), flush=True)
-                    train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
-                    self.scheduler.step()
-                    if self.stop_event.is_set():
-                        raise Exception("Stop requested")
+            self.train(round_config)
+            # if self.round_type == "fedavg":
+            #     for i in range(round_config['epochs']):
+            #         print('Running epoch {} with LR {:.5e}'.format(i, self.optimizer.param_groups[0]['lr']), flush=True)
+            #         train(self.train_loader, self.model, self.loss, self.optimizer, i + 1, self)
+            #         self.scheduler.step()
+            #         if self.stop_event.is_set():
+            #             raise Exception("Stop requested")
             # elif self.round_type == "fedprocx":
             #     base_loss, base_acc = self.evaluate(self.train_loader)
             #     i = 1
@@ -145,7 +168,10 @@ class PytorchModelTrainer:
             #             raise Exception("Stop requested")
             report = self.validate()
             self.model.cpu()
-            self.helper.save_model(weights_to_np(self.model.state_dict()), self.global_model_path)
+            model = weights_to_np(self.model.state_dict())
+            model["momentum"] = grad_to_np(self.global_momentum)
+            self.helper.save_model(model, self.global_model_path)
+            self.momentum_change = None
             return report
         except Exception as e:
             print("Error while running the round ", e, flush=True)
@@ -177,6 +203,7 @@ def train(train_loader, model, criterion, optimizer, epoch, model_trainer):
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
+        # print(model.parameters().grad)
         optimizer.step()
         output = output.float()
         loss = loss.float()
@@ -278,15 +305,17 @@ if __name__ == "__main__":
             print('Failed to read model_config from settings file', flush=True)
             raise e
     print("Setting files loaded successfully !!!")
-    client_config["training"]["cuda_device"] = "cpu"
+    client_config["training"]["cuda_device"] = "cuda:0"
     client_config["training"]["directory"] = "data/clients/" + "1" + "/"
     client_config["training"]["data_path"] = client_config["training"]["directory"] + "data.npz"
     client_config["training"]["global_model_path"] = client_config["training"]["directory"] + "weights.npz"
+    client_config["training"]["train_samples"] = 1000
+    client_config["training"]["test_samples"] = 500
     model_trainer = PytorchModelTrainer(client_config["training"])
     model_trainer.model.to(model_trainer.device)
     stop_round_event = threading.Event()
     model_trainer.stop_event = stop_round_event
-    for i in range(200):
+    for i in range(2):
         print('current lr {:.5e}'.format(model_trainer.optimizer.param_groups[0]['lr']))
         train(model_trainer.train_loader, model_trainer.model, model_trainer.loss, model_trainer.optimizer, i + 1,
               model_trainer)

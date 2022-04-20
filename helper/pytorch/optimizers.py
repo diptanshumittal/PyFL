@@ -1,4 +1,127 @@
+import collections
+
 import torch
+from copy import deepcopy
+
+
+class SFWDistributed(torch.optim.Optimizer):
+    """Stochastic Frank Wolfe Algorithm
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        learning_rate (float): learning rate between 0.0 and 1.0
+        rescale (string or None): Type of learning_rate rescaling. Must be 'diameter', 'gradient' or None
+        momentum (float): momentum factor, 0 for no momentum
+    """
+
+    def __init__(self, params, constraints=None, learning_rate=0.1, rescale='diameter', momentum=0.9, weight_decay=0):
+        self.lr = None
+        if not (0.0 <= learning_rate <= 1.0):
+            raise ValueError("Invalid learning rate: {}".format(learning_rate))
+        if not (0.0 <= momentum <= 1.0):
+            raise ValueError("Momentum must be between [0, 1].")
+        if not (rescale in ['diameter', 'gradient', None]):
+            raise ValueError("Rescale type must be either 'diameter', 'gradient' or None.")
+        self.constraints = constraints
+        # Parameters
+        self.rescale = rescale
+
+        defaults = dict(lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
+        super(SFWDistributed, self).__init__(params, defaults)
+
+    def get_grad(self):
+        grad = []
+        for group in range(len(self.param_groups)):
+            temp = collections.OrderedDict()
+            for p in range(len(self.param_groups[group]['params'])):
+                temp[p] = self.param_groups[group]['params'][p].grad.detach().clone()
+            grad.append(temp)
+        return grad
+
+    def update_momentum(self, momentum, y_old):
+        new_grad = self.get_grad()
+        y_new = deepcopy(y_old)
+        for i in range(len(y_old)):
+            for key in y_old[i].keys():
+                y_new[i][key] = torch.add((1 - self.lr) * y_old[i][key], self.lr * new_grad[i][key])
+                momentum[i][key] = torch.add(torch.sub(momentum[i][key], y_old[i][key]), y_new[i][key])
+        return momentum, y_new
+
+    @torch.no_grad()
+    def step(self, global_momentum=None, constraints=None, closure=None):
+        """Performs a single optimization step.
+        Args:
+            global_momentum (iterable): list of momentum for all the params in the in param_groups.
+            constraints (iterable): list of constraints, where each is an initialization of Constraint subclasses
+            parameter groups
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+        if self.constraints is None:
+            if constraints is None:
+                raise ValueError("Please initialize Constraints before backpropagation")
+            else:
+                self.constraints = constraints
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+        idx = 0
+        if global_momentum is not None:
+            for group in range(len(self.param_groups)):
+                for p in range(len(self.param_groups[group]['params'])):
+                    v = self.constraints[idx].lmo(global_momentum[group][p])  # LMO optimal solution
+                    if self.rescale == 'diameter':
+                        # Rescale lr by diameter
+                        factor = 1. / self.constraints[idx].get_diameter()
+                    elif self.rescale == 'gradient':
+                        # Rescale lr by gradient
+                        factor = torch.norm(global_momentum[group][p], p=2) / torch.norm(
+                            self.param_groups[group]['params'][p] - v, p=2)
+                    else:
+                        # No rescaling
+                        factor = 1
+                    self.lr = max(0.0, min(factor * self.param_groups[group]['lr'], 1.0))  # Clamp between [0, 1]
+                    self.param_groups[group]['params'][p].mul_(1 - self.lr)
+                    self.param_groups[group]['params'][p].add_(v, alpha=self.lr)
+                    idx += 1
+            return loss
+        for group in self.param_groups:
+            weight_decay = group['weight_decay']
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                d_p = p.grad
+                if weight_decay != 0:
+                    d_p = d_p.add(p, alpha=weight_decay)
+                # Add momentum
+                momentum = group['momentum']
+                if momentum > 0:
+                    param_state = self.state[p]
+                    if 'momentum_buffer' not in param_state:
+                        param_state['momentum_buffer'] = d_p.detach().clone()
+                    else:
+                        param_state['momentum_buffer'].mul_(momentum).add_(d_p, alpha=1 - momentum)
+                        d_p = param_state['momentum_buffer']
+
+                v = self.constraints[idx].lmo(d_p)  # LMO optimal solution
+
+                if self.rescale == 'diameter':
+                    # Rescale lr by diameter
+                    factor = 1. / self.constraints[idx].get_diameter()
+                elif self.rescale == 'gradient':
+                    # Rescale lr by gradient
+                    factor = torch.norm(d_p, p=2) / torch.norm(p - v, p=2)
+                else:
+                    # No rescaling
+                    factor = 1
+
+                lr = max(0.0, min(factor * group['lr'], 1.0))  # Clamp between [0, 1]
+
+                p.mul_(1 - lr)
+                p.add_(v, alpha=lr)
+                idx += 1
+        return loss
 
 
 class SFW(torch.optim.Optimizer):
