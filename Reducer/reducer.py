@@ -11,9 +11,6 @@ import subprocess
 from minio import Minio
 from contextlib import closing
 from multiprocessing import Process
-from helper.pytorch.pytorch_helper import PytorchHelper
-from model.pytorch_model_trainer import weights_to_np
-from model.pytorch.pytorch_models import create_seed_model
 from Reducer.reducer_rest_service import ReducerRestService
 
 
@@ -60,25 +57,13 @@ class Reducer:
             os.mkdir(os.getcwd() + "/data/logs")
         if not os.path.exists(os.getcwd() + "/data/logs/" + self.training_id):
             os.mkdir(os.getcwd() + "/data/logs/" + self.training_id)
-        # sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/reducer.txt", "w")
+        sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/reducer.txt", "w")
         self.buckets = ["fedn-context"]
         self.port = find_free_port()
 
         if not os.path.exists(common_config["tensorboard"]["path"]):
             os.mkdir(common_config["tensorboard"]["path"])
         Process(target=run_tensorboard, args=(common_config["tensorboard"],), daemon=True).start()
-        # try:
-        #     if not os.path.exists(os.getcwd() + '/data/reducer'):
-        #         os.mkdir(os.getcwd() + '/data/reducer')
-        #     self.global_model = "initial_model.npz"
-        #     self.global_model_path = os.getcwd() + '/data/reducer/initial_model.npz'
-        #     model, loss, optimizer, _ = create_seed_model(common_config["training"])
-        #     helper = PytorchHelper()
-        #     helper.save_model(weights_to_np(model.state_dict()), self.global_model_path)
-        # except Exception as e:
-        #     print("Error while creating seed model : ", e)
-        #     raise e
-        # print("Seed model created successfully !!")
         try:
             storage_config = common_config["storage"]
             assert (storage_config["storage_type"] == "S3")
@@ -96,7 +81,6 @@ class Reducer:
             reducer_config_as_a_stream = io.BytesIO(reducer_config_as_bytes)
             self.minio_client.put_object(self.buckets[0], "reducer_config.txt", reducer_config_as_a_stream,
                                          length=reducer_config_as_a_stream.getbuffer().nbytes)
-            # self.minio_client.fput_object(self.buckets[0], self.global_model, self.global_model_path)
             print("Address - http://", get_local_ip(), ":", self.port, sep="")
         except Exception as e:
             print(e)
@@ -112,6 +96,7 @@ class Reducer:
         try:
             print("Initializing rest service class")
             self.rest = ReducerRestService(self.minio_client, config, common_config)
+            print("Rest service setup successful")
         except Exception as e:
             print("Error while setting up rest service ", e)
             exit()

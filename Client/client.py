@@ -9,7 +9,6 @@ import yaml
 import json
 import socket
 import threading
-import torch
 import requests as r
 from minio import Minio
 from contextlib import closing
@@ -28,8 +27,6 @@ opt = vars(args)
 args = yaml.load(open('settings/settings-common.yaml'), Loader=yaml.FullLoader)
 opt.update(args)
 args = opt
-print(dict(args))
-time.sleep(20)
 
 def find_free_port():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
@@ -189,7 +186,7 @@ class Client:
                 raise ValueError("Not able to connect to the server")
         except Exception as e:
             print(e)
-        # sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
+        sys.stdout = open(os.getcwd() + "/data/logs/" + self.training_id + "/" + self.client_id + ".txt", "w")
         client_config["training"]["directory"] = "data/clients/" + self.client_id + "/"
         if not os.path.exists("data/clients/"):
             os.mkdir("data/clients/")
@@ -245,15 +242,10 @@ class Client:
 
     def run(self):
         print("------------Starting Rest service on Flask server----------")
-        # threading.Thread(target=self.control_loop, daemon=True).start()
         self.rest.run()
 
 
 if __name__ == "__main__":
-    # if not torch.cuda.is_available():
-    #     print("Cuda not available!!")
-    #     exit()
-    # print(torch.__version__, flush=True)
     try:
         client = Client(args)
         client.run()
